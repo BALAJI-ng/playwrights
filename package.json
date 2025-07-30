@@ -12,6 +12,8 @@
     "test:webkit": "npx playwright test --project=webkit",
     "test:mobile": "npx playwright test --project=\"Mobile Chrome\" --project=\"Mobile Safari\"",
     "test:all-browsers": "npx playwright test --project=chromium --project=firefox --project=webkit --project=\"Microsoft Edge\" --project=\"Google Chrome\"",
+    "test:smoke": "npx playwright test -g \"should load homepage successfully|should load page within acceptable time|should have secure HTTPS connection\"",
+    "test:ci": "npx playwright test --max-failures=5 --reporter=line",
     "test:report": "npx playwright show-report",
     "test:install": "npx playwright install"
   },

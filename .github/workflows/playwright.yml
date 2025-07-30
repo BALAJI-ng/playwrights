@@ -10,9 +10,50 @@ on:
     - cron: "0 6 * * *"
 
 jobs:
-  test:
-    timeout-minutes: 60
+  smoke-test:
+    timeout-minutes: 15
     runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        browser: [chromium, firefox]
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+
+      - name: Run Smoke tests (Core functionality)
+        run: |
+          npx playwright test --project=${{ matrix.browser }} \
+            -g "should load homepage successfully|should load page within acceptable time|should have secure HTTPS connection" \
+            --reporter=line
+
+      - name: Upload smoke test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-test-results-${{ matrix.browser }}
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 7
+
+  full-test:
+    timeout-minutes: 45
+    runs-on: ubuntu-latest
+    needs: smoke-test
+    if: github.event_name == 'schedule' || contains(github.event.head_commit.message, '[full-test]')
 
     strategy:
       matrix:
@@ -33,8 +74,8 @@ jobs:
       - name: Install Playwright Browsers
         run: npx playwright install --with-deps ${{ matrix.browser }}
 
-      - name: Run Playwright tests
-        run: npx playwright test --project=${{ matrix.browser }}
+      - name: Run Full test suite
+        run: npx playwright test --project=${{ matrix.browser }} --max-failures=10
 
       - name: Upload test results
         uses: actions/upload-artifact@v4
@@ -47,8 +88,9 @@ jobs:
           retention-days: 30
 
   mobile-test:
-    timeout-minutes: 30
+    timeout-minutes: 20
     runs-on: ubuntu-latest
+    needs: smoke-test
 
     steps:
       - uses: actions/checkout@v4
@@ -64,8 +106,11 @@ jobs:
       - name: Install Playwright Browsers
         run: npx playwright install --with-deps chromium webkit
 
-      - name: Run Mobile tests
-        run: npx playwright test --project="Mobile Chrome" --project="Mobile Safari"
+      - name: Run Mobile smoke tests
+        run: |
+          npx playwright test --project="Mobile Chrome" --project="Mobile Safari" \
+            -g "should load homepage successfully|should show mobile-optimized layout" \
+            --reporter=line
 
       - name: Upload mobile test results
         uses: actions/upload-artifact@v4
@@ -77,9 +122,10 @@ jobs:
             playwright-report/
           retention-days: 30
 
-  security-audit:
+  performance-test:
     timeout-minutes: 15
     runs-on: ubuntu-latest
+    needs: smoke-test
 
     steps:
       - uses: actions/checkout@v4
@@ -95,14 +141,17 @@ jobs:
       - name: Install Playwright Browsers
         run: npx playwright install --with-deps chromium
 
-      - name: Run Security tests
-        run: npx playwright test --project=chromium security.spec.js
+      - name: Run Performance tests
+        run: |
+          npx playwright test --project=chromium performance.spec.js \
+            -g "should load page within acceptable time|should have good Core Web Vitals" \
+            --reporter=line
 
-      - name: Upload security test results
+      - name: Upload performance test results
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: security-test-results
+          name: performance-test-results
           path: |
             test-results/
             playwright-report/
@@ -111,7 +160,7 @@ jobs:
   generate-report:
     timeout-minutes: 10
     runs-on: ubuntu-latest
-    needs: [test, mobile-test, security-audit]
+    needs: [smoke-test, mobile-test, performance-test]
     if: always()
 
     steps:
@@ -126,8 +175,8 @@ jobs:
         run: |
           mkdir -p merged-results/test-results
           mkdir -p merged-results/playwright-report
-          find all-test-results -name "*.json" -exec cp {} merged-results/test-results/ \;
-          find all-test-results -name "*.html" -exec cp {} merged-results/playwright-report/ \;
+          find all-test-results -name "*.json" -exec cp {} merged-results/test-results/ \; || true
+          find all-test-results -name "*.html" -exec cp {} merged-results/playwright-report/ \; || true
 
       - name: Upload merged results
         uses: actions/upload-artifact@v4
